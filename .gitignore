@@ -1,0 +1,33 @@
+# KIWUME: 환경변수 및 민감정보
+.env
+*.env
+config.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 데이터
+*.jsonl
+data/*.csv
+!data/kiwume_raw.csv
+
+# 로그
+*.log
+
