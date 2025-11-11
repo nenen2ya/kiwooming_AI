@@ -8,6 +8,7 @@ KIWUME: 키우밍 인터랙티브 챗봇
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 from openai import OpenAI
@@ -20,18 +21,22 @@ if sys.platform == 'win32':
 
 
 def load_config():
-    """config.json 파일에서 설정을 로드"""
-    project_root = Path(__file__).parent.parent
-    config_path = project_root / "config.json"
-    
-    if not config_path.exists():
-        raise ValueError(f"[ERROR] config.json 파일을 찾을 수 없습니다: {config_path}")
-    
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = json.load(f)
-    
-    return config
+    """환경변수에서 설정 로드 (Render 배포용)"""
+    config = {
+        "openai_api_key": os.getenv("OPENAI_API_KEY"),
+        "kiwume_model_id": os.getenv("KIWUME_MODEL_ID"),
+        "kiwooming_system_prompt": os.getenv(
+            "KIWOOMING_SYSTEM_PROMPT",
+            "당신은 키움증권 MTS 내 AI 반려 챗봇 키우밍입니다. 화면 구조를 바탕으로 맥락을 이해하고 답하세요."
+        ),
+    }
 
+    if not config["openai_api_key"]:
+        raise ValueError("❌ 환경변수 OPENAI_API_KEY가 설정되지 않았습니다.")
+    if not config["kiwume_model_id"]:
+        raise ValueError("❌ 환경변수 KIWUME_MODEL_ID가 설정되지 않았습니다.")
+
+    return config
 
 def chat_with_kiwooming(client: OpenAI, model_id: str, system_prompt: str):
     """
