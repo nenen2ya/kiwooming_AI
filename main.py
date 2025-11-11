@@ -1,14 +1,23 @@
 # main.py
 from fastapi import FastAPI
-from scripts.chat_with_kiwooming import get_ai_response  # ← 이게 네 실제 AI 함수라고 가정
+from pydantic import BaseModel
+from scripts.chat_with_kiwooming import get_ai_response
 
-app = FastAPI()
+app = FastAPI(title="Kiwooming AI Server")
+
+# ✅ JSON body용 데이터 모델
+class ChatRequest(BaseModel):
+    text: str
+    context: str | None = None
 
 @app.get("/")
 def root():
     return {"message": "🚀 Kiuming AI Server Running!"}
 
 @app.post("/chat")
-def chat_endpoint(text: str, context: str = None):
-    reply = get_ai_response(text, context)
+def chat_endpoint(req: ChatRequest):
+    """
+    프론트/백엔드에서 {text, context} JSON으로 전달하는 요청을 처리
+    """
+    reply = get_ai_response(req.text, req.context)
     return {"reply": reply}
