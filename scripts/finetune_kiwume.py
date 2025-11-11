@@ -23,23 +23,34 @@ if sys.platform == 'win32':
 
 def load_config():
     """
-    config.json 파일에서 설정을 로드
+    Render 환경변수 또는 로컬 config.json에서 설정을 로드
     """
-    # 프로젝트 루트의 config.json 파일 로드
-    project_root = Path(__file__).parent.parent
-    config_path = project_root / "config.json"
-    
-    if not config_path.exists():
-        raise ValueError(f"[ERROR] config.json 파일을 찾을 수 없습니다: {config_path}")
-    
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = json.load(f)
-    
-    api_key = config.get("openai_api_key")
+    api_key = os.getenv("OPENAI_API_KEY")
+    model_id = os.getenv("KIWUME_MODEL_ID")
+    system_prompt = os.getenv("KIWOOMING_SYSTEM_PROMPT")
+
     if not api_key:
-        raise ValueError("[ERROR] openai_api_key를 config.json에서 찾을 수 없습니다.")
-    
-    return config
+        project_root = Path(__file__).parent.parent
+        config_path = project_root / "config.json"
+        
+        if not config_path.exists():
+            raise ValueError(f"[ERROR] config.json 파일을 찾을 수 없습니다: {config_path}")
+        
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+        
+        api_key = config.get("openai_api_key")
+        model_id = config.get("kiwume_model_id")
+        system_prompt = config.get("kiwooming_system_prompt")
+
+    if not api_key:
+        raise ValueError("[ERROR] OpenAI API 키를 찾을 수 없습니다 (환경변수 또는 config.json).")
+
+    return {
+        "openai_api_key": api_key,
+        "kiwume_model_id": model_id,
+        "kiwooming_system_prompt": system_prompt
+    }
 
 
 def upload_training_file(client: OpenAI, file_path: str):
