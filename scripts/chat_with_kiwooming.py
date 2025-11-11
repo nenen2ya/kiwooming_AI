@@ -130,6 +130,33 @@ def chat_with_kiwooming(client: OpenAI, model_id: str, system_prompt: str):
             print(f"\n[ERROR] 오류가 발생했습니다: {e}")
             print("다시 시도해보세요.\n")
 
+def get_ai_response(user_input: str, context: str | None = None) -> str:
+    """
+    FastAPI용 — 서버에서 호출 가능한 버전
+    """
+    try:
+        config = load_config()
+        client = OpenAI(api_key=config["openai_api_key"])
+        model_id = config.get("kiwume_model_id")
+        system_prompt = config.get("kiwooming_system_prompt", "당신은 키움증권 투자 도우미 키우밍입니다.")
+
+        conversation_history = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_input}
+        ]
+
+        response = client.chat.completions.create(
+            model=model_id,
+            messages=conversation_history,
+            temperature=0.7,
+            max_tokens=400
+        )
+
+        return response.choices[0].message.content
+
+    except Exception as e:
+        return f"⚠️ 오류 발생: {str(e)}"
+
 
 def main():
     """메인 실행 함수"""
