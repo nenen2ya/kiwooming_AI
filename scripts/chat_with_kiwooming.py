@@ -7,11 +7,16 @@
 KIWUME: 키우밍 인터랙티브 챗봇
 """
 
+
 import json
 import os
 import sys
 from pathlib import Path
 from openai import OpenAI
+
+from dotenv import load_dotenv
+load_dotenv()  # .env 파일 읽기
+
 
 # KIWUME: Windows 콘솔 한글 출력 설정
 if sys.platform == 'win32':
