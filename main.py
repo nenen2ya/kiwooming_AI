@@ -3,67 +3,170 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from scripts.chat_with_kiwooming import get_ai_response
 import requests
+import os
+import orjson 
 
 app = FastAPI(title="Kiwooming AI Server")
 
-compare_cache: dict[str, dict] = {}  # {"screen_name": compare_result_json}
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8001")
+PARSER_URL = os.getenv("PARSER_URL", "http://localhost:4001")
+COMPARE_URL = os.getenv("COMPARE_URL", "http://localhost:6002/compare")
+
+compare_cache: dict[str, dict] = {}
+backend_cache: dict[str, dict] = {}
+parser_cache: dict[str, dict] = {}
+
+def get_backend_ui(screen: str):
+    screen = screen.lower()
+    if screen in backend_cache:
+        return backend_cache[screen]
+
+    print(f"🔁 [CACHE MISS] backend_ui: {screen}")
+    url = f"{BACKEND_URL}/ui/{screen}"
+    res = requests.get(url, timeout=30)
+    data = res.json()
+    backend_cache[screen] = data
+    return data
+
+
+def get_parser(screen: str):
+    screen = screen.lower()
+    if screen in parser_cache:
+        return parser_cache[screen]
+
+    print(f"🔁 [CACHE MISS] parser: {screen}")
+    url = f"{PARSER_URL}/parse/{screen}"
+    res = requests.get(url, timeout=30)
+    data = res.json()
+    parser_cache[screen] = data
+    return data
+
+
+def get_compare(screen: str):
+    screen = screen.lower()
+    if screen in compare_cache:
+        return compare_cache[screen]
+
+    print(f"🔁 [CACHE MISS] compare: {screen}")
+
+
+    payload = {
+        "parser_url": f"{PARSER_URL}/parse/{screen}",
+        "backend_url": f"{BACKEND_URL}/ui/{screen}",
+    }
+
+
+    res = requests.post(COMPARE_URL, json=payload, timeout=30)
+    data = res.json()
+    compare_cache[screen] = data
+    return data
+
 
 from dotenv import load_dotenv
 load_dotenv()  # .env 파일 읽기
-
-
-# ✅ JSON body용 데이터 모델
-class ChatRequest(BaseModel):
-    text: str
-    context: str | None = None
 
 @app.get("/")
 def root():
     return {"message": "🚀 Kiuming AI Server Running!"}
 
+@app.on_event("startup")
+def preload_cache():
+    preload_screens = ["home", "stockhome", "newsdetail", "order", "quote", "chart"]
+    print("🔥 Preloading caches...")
+
+    for sc in preload_screens:
+        try:
+            get_backend_ui(sc)
+            get_parser(sc)
+            get_compare(sc)
+            print(f"   ✔ {sc} loaded")
+        except Exception as e:
+            print(f"   ⚠️ preload failed ({sc}): {e}")
+
+    print("🔥 Preload complete!")
+
+class ChatRequest(BaseModel):
+    text: str
+    context: str | None = None
+    section: str | None = None
+    scrollY: float | None = 0
+
+import time    
+
 @app.post("/chat")
 def chat_endpoint(req: ChatRequest):
+    start = time.time()
+    print("⏱️ /chat 요청 시작")
     try:
-        screen = req.context or "Home"
+        screen = (req.context or "home").lower()
 
-        # 1️⃣ UI 데이터 로드
-        backend_res = requests.get(f"http://localhost:8001/ui/{screen}")
-        backend_json = backend_res.json()
+        backend_json   = get_backend_ui(screen)
+        parser_json    = get_parser(screen)
+        compare_result = get_compare(screen)
 
-        parser_res = requests.get(f"http://localhost:4001/parse/{screen}")
-        parser_json = parser_res.json()
-
-        # 2️⃣ AI가 직접 비교하도록 프롬프트 구성
         user_input_full = f"""
-            [시스템 규칙]
-            너는 '키우밍'이라는 챗봇이야.  
-            아래 두 JSON 데이터(`parser_json`과 `backend_json`)를 비교하여,  
-            사용자가 현재 어떤 화면에 있고 어떤 기능들이 존재하는지 파악해.  
-            이 데이터를 기반으로만 대답해야 하며,  
-            기능 외에 일반적인 금융지식이나 주식 정보를 물어볼 때만 너의 내장 지식을 사용해.
+        [시스템 규칙]
+        너는 '키우밍'이라는 챗봇이야.  
+        아래 두 JSON 데이터(`parser_json`과 `backend_json`)를 비교하여,
+        사용자가 현재 어떤 화면에 있고 어떤 기능들이 존재하는지 파악해.  
+        이 데이터를 기반으로만 대답해야 하며,  
+        기능 외에 일반적인 금융지식이나 주식 정보를 물어볼 때만 너의 내장 지식을 사용해.
 
-            [parser_json]
-            {parser_json}
+        [대화 규칙]
+        1. **절대 실제 행동을 수행하지 마라.**
+           사용자가 화면 이동, 스크롤, 버튼 클릭 등을 요청하더라도
+           직접 수행하지 말고, 말로만 안내하라.
+           예: "스크롤을 조금 내려보세요." / "왼쪽 상단 버튼을 눌러보세요." / "아래쪽에 뉴스 카드가 있습니다." 등
 
-            [backend_json]
-            {backend_json}
+        2. **현재 스크롤 위치(scrollY)와 섹션(section)을 반드시 고려하라.**
+           - 사용자가 상단(`section=bigdata`)이나 중간(`section=ranking`)에 있을 때,
+             실제 기능이 화면 하단(`region=bottom`)에 있다면  
+             "지금 화면에서는 바로 보이지 않아요. 스크롤을 조금 내려보세요 🐾" 라고 안내해야 한다.
+           - 반대로 이미 하단(`section=ai_report`)에 있고 관련 기능이 상단에 있다면  
+             "위쪽으로 스크롤해 보시면 있습니다 ☝️" 라고 안내한다.
 
-            [사용자 질문]
-            {req.text}
+        3. **backend_json의 'region' 필드를 이용해 위치를 파악하라.**
+           - region이 'top'이면 "화면 상단"
+           - region이 'middle'이면 "화면 중간"
+           - region이 'bottom'이면 "화면 하단"
+           으로 간주한다.
 
-            비교 규칙:
-            1. backend_json의 elements.description을 기준으로 설명을 우선 신뢰한다.
-            2. parser_json의 tag와 backend_json의 element_label이 유사하면 연결된다고 간주한다.
-            3. 두 데이터에 공통으로 등장하지 않는 기능은 "이 화면에는 없습니다."라고 답한다.
-            """
+        4. **backend_json의 description을 우선 신뢰하라.**
+           parser_json의 tag가 backend_json의 element_label과 유사할 경우 연결된 기능으로 본다.
+
+        5. 두 JSON에 공통으로 존재하지 않는 기능은
+           "이 화면에는 그런 기능이 없습니다." 라고 답한다.
+
+        6. **너는 사용자의 반려동물 역할이다.**
+           귀엽고 친근한 말투로 대답하라. 가끔 🐾 같은 이모지도 섞어줘라.
+           사용자가 스트레스를 받거나 화가 난 것 같으면 부드럽게 위로하거나 응원하라.
+
+        [현재 맥락]
+        - 현재 화면: {req.context}
+        - 현재 섹션: {req.section}
+        - 현재 스크롤 위치: {req.scrollY}
+
+        [backend_json]
+        {orjson.dumps(backend_json).decode()}
+
+        [parser_json]
+        {orjson.dumps(parser_json).decode()}
+
+        [compare_result]
+        {orjson.dumps(compare_result).decode()}
+
+        [사용자 질문]
+        {req.text}
+        """
 
         reply = get_ai_response(user_input_full)
+        end = time.time()
+        print(f"⏱️ /chat 처리 시간: {end - start:.2f}초")
         return {"reply": reply}
 
     except Exception as e:
+        print(f"❌ [chat_endpoint ERROR] {e}")
         return {"reply": f"오류 발생: {str(e)}"}
-
-
 
 class CompareRequest(BaseModel):
     parser_url: str  
@@ -101,14 +204,14 @@ def compare_ui(req: CompareRequest):
     except Exception as e:
         return {"error": str(e)}
 
-# ✅ compare 결과를 요약해주는 함수
-def summarize_ui(compare_result: dict) -> str:
-    elements = compare_result.get("elements", [])
-    screen = compare_result.get("screen", "Unknown")
+# # ✅ compare 결과를 요약해주는 함수
+# def summarize_ui(compare_result: dict) -> str:
+#     elements = compare_result.get("elements", [])
+#     screen = compare_result.get("screen", "Unknown")
 
-    # 요소별 설명 추출
-    desc_list = [f"- {el.get('tag', '?')}: {el.get('description', '설명 없음')}" for el in elements]
-    summary = "\n".join(desc_list)
+#     # 요소별 설명 추출
+#     desc_list = [f"- {el.get('tag', '?')}: {el.get('description', '설명 없음')}" for el in elements]
+#     summary = "\n".join(desc_list)
 
-    # 최종 요약 문자열
-    return f"[현재 화면: {screen}]\n화면 구성 요소 요약:\n{summary}"
+#     # 최종 요약 문자열
+#     return f"[현재 화면: {screen}]\n화면 구성 요소 요약:\n{summary}"
